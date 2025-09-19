@@ -1,12 +1,4 @@
-pip install requests pandas matplotlib seaborn weasyprint```
-
-또한, **윈도우 사용자**의 경우 `WeasyPrint`가 제대로 작동하려면 [이전 답변](#user-content-weasyprint-could-not-import-some-external-libraries-please-carefully-follow-the-installation-steps-before-reporting-an-issue)에 안내된 **GTK+ 설치 과정**을 반드시 완료해야 합니다.
-
----
-
-### 최종 통합 코드
-
-```python
+# pip install requests pandas matplotlib seaborn weasyprint```
 # ==============================================================================
 # Ultimate On-Chain Scam Analyzer
 # 
@@ -188,4 +180,4 @@ if __name__ == "__main__":
     # --- 최종 데이터로 분석 및 보고서 생성 함수 호출 ---
     generate_analysis_report(df_final)
 
-    print("\n🎉 모든 작업이 성공적으로 완료되었습니다.")```
+    print("\n🎉 모든 작업이 성공적으로 완료되었습니다.")
