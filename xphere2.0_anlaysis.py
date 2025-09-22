@@ -14,8 +14,8 @@
 # 3. 아래 코드를 .py 파일로 저장하고 'python [파일명].py' 실행
 # ==============================================================================
 
-import requests
 import pandas as pd
+import subprocess
 from datetime import datetime
 import time
 import os
@@ -23,68 +23,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from weasyprint import HTML
 
-# --- 1. 기본 설정 ---
-API_URL = 'https://xp.tamsa.io/xphere/api/v1/tx'
+# --- 기본 설정 ---
 DIVISOR = 10**18
 TIMESTAMP = datetime.now().strftime('%Y%m%d_%H%M%S')
-CSV_FILENAME = f"transactions_{TIMESTAMP}.csv"
 PDF_FILENAME = f"Scam_Coin_Analysis_Report_{TIMESTAMP}.pdf"
 CHART_FILENAME = f"transaction_chart_{TIMESTAMP}.png"
-
-
-def fetch_transactions_in_batches(existing_tx_ids=None):
-    """
-    API의 전체 페이지를 스캔하여 트랜잭션 데이터를 수집하는 함수.
-    이중 스캔을 위해 이미 수집된 txId 집합을 받아 누락된 데이터만 찾아낼 수 있습니다.
-    """
-    if existing_tx_ids is None:
-        existing_tx_ids = set()
-        is_second_scan = False
-    else:
-        is_second_scan = True
-
-    collected_transactions = []
-    page = 1
-    limit = 100
-
-    while True:
-        try:
-            params = {'page': page, 'limit': limit}
-            response = requests.get(API_URL, params=params, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            rows = data.get('rows', [])
-
-            if not rows:
-                scan_type = "2차 (누락분 확인)" if is_second_scan else "1차"
-                print(f"페이지 {page}에서 더 이상 데이터가 없어 {scan_type} 스캔을 종료합니다.")
-                break
-
-            new_found_count = 0
-            for tx in rows:
-                tx_id = tx.get('txId')
-                if tx_id not in existing_tx_ids:
-                    collected_transactions.append(tx)
-                    if is_second_scan:
-                        existing_tx_ids.add(tx_id)
-                    new_found_count += 1
-            
-            if is_second_scan:
-                print(f"페이지 {page} 완료 (새로 발견된 누락 데이터: {new_found_count}건)")
-            else:
-                print(f"페이지 {page} 완료 (총 {len(collected_transactions)}건 수집)")
-
-            page += 1
-            time.sleep(0.2)
-
-        except requests.exceptions.RequestException as e:
-            print(f"페이지 {page} 요청 중 오류 발생: {e}")
-            break
-        except Exception as e:
-            print(f"알 수 없는 오류 발생: {e}")
-            break
-            
-    return collected_transactions
 
 
 def generate_analysis_report(df_full):
@@ -147,37 +90,53 @@ def generate_analysis_report(df_full):
 
 
 if __name__ == "__main__":
-    # --- 1차 스캔 실행 및 저장 ---
-    print("--- 1차 전체 데이터 스캔을 시작합니다. ---")
-    initial_transactions = fetch_transactions_in_batches()
-    
-    if not initial_transactions:
-        print("\n⚠️ 1차 스캔에서 수집된 데이터가 없습니다. 프로그램을 종료합니다.")
+    # 각 데이터별 최신 csv 파일 찾기
+    def find_latest_csv(prefix):
+        files = [f for f in os.listdir('.') if f.startswith(prefix) and f.endswith('.csv')]
+        if not files:
+            return None
+        files.sort(reverse=True)
+        return files[0]
+
+    latest_files = {
+        'transactions': find_latest_csv('transactions_'),
+        'mblocks': find_latest_csv('mblocks_'),
+        'pblocks': find_latest_csv('pblocks_'),
+        'tokens': find_latest_csv('tokens_'),
+        'unions': find_latest_csv('unions_'),
+    }
+
+    print("\n[최신 데이터 파일 현황]")
+    for k, v in latest_files.items():
+        print(f"{k}: {v if v else '없음'}")
+
+    # 다시 수집할지 물어보고, 필요시 해당 py 실행
+    py_map = {
+        'transactions': 'xphere2.0_transactions.py',
+        'mblocks': 'xphere2.0_mblocks.py',
+        'pblocks': 'xphere2.0_pblocks.py',
+        'tokens_unions': 'xphere2.0_tokens_unions.py',
+    }
+    to_collect = []
+    for k in ['transactions', 'mblocks', 'pblocks']:
+        ans = input(f"{k} 데이터를 다시 수집할까요? (y/n): ").strip().lower()
+        if ans == 'y':
+            to_collect.append(py_map[k])
+    # tokens/unions는 같이 처리
+    ans = input("tokens/unions 데이터를 다시 수집할까요? (y/n): ").strip().lower()
+    if ans == 'y':
+        to_collect.append(py_map['tokens_unions'])
+
+    for pyfile in to_collect:
+        print(f"\n[실행] {pyfile} ...")
+        subprocess.run(['python', pyfile])
+
+    # 분석에 사용할 트랜잭션 파일 재탐색
+    csv_file = find_latest_csv('transactions_')
+    if not csv_file:
+        print("분석할 트랜잭션 CSV 파일이 없습니다. 먼저 데이터를 수집하세요.")
         exit()
-
-    df_initial = pd.DataFrame(initial_transactions)
-    df_initial.to_csv(CSV_FILENAME, index=False, encoding='utf-8-sig')
-    print(f"\n✅ 1차 스캔 완료. {len(df_initial)}개의 데이터가 '{CSV_FILENAME}' 파일에 저장되었습니다.")
-    
-    seen_tx_ids = set(df_initial['txId'])
-
-    # --- 2차 스캔으로 누락된 데이터 찾기 ---
-    print(f"\n--- 2차 스캔을 시작합니다. (누락 데이터 확인) ---")
-    missing_transactions = fetch_transactions_in_batches(existing_tx_ids=seen_tx_ids)
-
-    df_final = df_initial
-    if missing_transactions:
-        print(f"\n✅ 2차 스캔 완료. {len(missing_transactions)}개의 누락된 데이터를 발견했습니다.")
-        df_missing = pd.DataFrame(missing_transactions)
-        df_missing.to_csv(CSV_FILENAME, mode='a', header=False, index=False, encoding='utf-8-sig')
-        print(f"누락된 데이터가 '{CSV_FILENAME}' 파일에 추가되었습니다.")
-        
-        # 최종 분석을 위해 두 데이터프레임을 합침
-        df_final = pd.concat([df_initial, df_missing], ignore_index=True)
-    else:
-        print("\n✅ 2차 스캔 완료. 추가로 발견된 누락 데이터는 없습니다.")
-        
-    # --- 최종 데이터로 분석 및 보고서 생성 함수 호출 ---
-    generate_analysis_report(df_final)
-
+    print(f"분석에 사용할 파일: {csv_file}")
+    df = pd.read_csv(csv_file)
+    generate_analysis_report(df)
     print("\n🎉 모든 작업이 성공적으로 완료되었습니다.")
